@@ -1,0 +1,29 @@
+List of potential cool additions to the project
+
+DOCUMENTATION
+[X] readme
+[ ] docstrings
+  [X] app.py  
+  [ ] engine.py  
+  [ ] helpers.py  
+  [ ] insert.py  
+  [ ] models.py  
+  [ ] parse_
+  [ ] inputs.py  
+  [ ] settings.py  
+  [ ] test_endpoint.py  
+  [ ] tests.py
+  
+SIMPLE FEATURES
+[ ] only warn when location is before the event (currently it is just ST_DWITHIN)
+[ ] authentication/session-tokens
+[ ] make tests randomized (e.g. simulate GPS error better)
+[ ] refactor queries
+[ ] be consistent with use of conn, engine, session (go with conn for now)
+NOT-SO-SIMPLE FEATURES
+[ ] new endpoint for POSTing new trip information via json object
+[ ] better support for real-life behavior (turning on to a new route, sitting at lights, ...)
+[ ] test to make sure that at every point along route, the exactly correct messages are given
+PERFORMANCE
+[ ] diagnose why the queries are sluggish
+[ ] research and implement spatial indexing
