@@ -71,8 +71,16 @@ This is currently implemented by searching for buffered paths (to account for GP
 7. Install third-party dependencies
 
         pip install -r requirements.txt
+        
+8. Create an environmental variable for automatic api username
+    
+    You'll need access to the username provided by Automatic for this coding test. create an environmental variable in your .bashrc (or shell of choice).
 
-8. Run tests!
+        export AUTOMATIC_TEST_USERNAME=<USERNAME>
+        
+9. Go to settings.py and change the OS_USERNAME to the username that will access the Postgres database
+
+10. Run tests!
 
         python test_db.py
         python test_endpoint.py
