@@ -355,17 +355,6 @@ class SpatialQueries:
             func.ST_Line_Interpolate_Point(
             line, new_distance/total_length)))[0][0]
         return new_point
-    
-
-    
-
-class ST_LocateAlong(GenericFunction):
-    name = 'ST_LocateAlong'
-    type = Geometry
-
-class ST_GeometryFromText(GenericFunction):
-    name = 'ST_GeometryFromText'
-    type = Geometry
         
     
         
