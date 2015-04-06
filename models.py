@@ -1,3 +1,8 @@
+'''ORM models for a Postgres database with PostGIS extensions.
+
+The biggest missing thing here is spatial indexes. Could provide a huge speedup.
+'''
+
 ## California UTM zone 10: 26910
 ## Assuming NAD83 for datum
 
@@ -14,9 +19,6 @@ from sqlalchemy.sql import select, text
 
 from engine import engine, session
 import settings
-
-
-
 Base = declarative_base()
 
 class User(Base):
@@ -60,10 +62,12 @@ class Trip(Base):
     hard_acceleration_events = relationship('HardAccelerationEvent', 
                                             backref=backref('trips', order_by=trip_id))
     def __init__(self, trip=None, srid='0'):
-        """This won't try to catch KeyErrors because it is 
-        better than nasty surprises later.
-        """
-
+        '''This function needs to modify the input data that it is provided.
+        
+        Special considerations need to be made for geometry fields and remapping
+        of keys to avoid collisions.
+        '''
+        trip = trip.copy()
         self.event_types = {
             'speeding': SpeedingEvent,
             'hard_accel': HardAccelerationEvent,
@@ -74,12 +78,12 @@ class Trip(Base):
         trip.pop('user')
         # this path will be used to find speeding_event substrings
         path_linestring = SpatialQueries.points_to_projected_line(trip['path'])
+        trip['geom_path'] = path_linestring
         # paths are stored with a 20 M buffer as a polygon to account for gps
         # inaccuracies. This is just a very rough way to do this, more care
         # would be needed for a robust solution, such as greater buffer size,
         # or simply checking that a high percentage of points are within a smaller
         # buffer.
-        trip['geom_path'] = path_linestring
         trip['geom'] = func.ST_Buffer(path_linestring, 20)
         trip_id_string = trip.pop('id')
         trip['trip_id_string'] = trip_id_string
@@ -87,13 +91,16 @@ class Trip(Base):
         
         super(Trip, self).__init__(**trip)
 
-
+        # Instantiate each drive event with its respective class
+        # and then append it to its respective list on the trip mapped object
         for event in drive_events:
             cls = self.event_types[event.pop('type')]
             lst = getattr(self, cls.__tablename__)
             lst.append(cls(trip['trip_id_string'], event, path_linestring))
 
 class SpeedingEvent(Base):
+    '''Database table for speeding events, child of relation from trips table.
+    '''
     __tablename__ = 'speeding_events'
     speeding_event_id = Column(Integer, primary_key=True)
     trip_id = Column(Integer, ForeignKey('trips.trip_id'))
@@ -108,6 +115,8 @@ class SpeedingEvent(Base):
     velocity_mph = Column(Float)
 
     def __init__(self, trip, event, path):
+        '''Remap names to avoid collisions and create geometries.
+        '''
         event = event.copy()
         event['line'] = SpatialQueries.find_line_substring(
             path, 
@@ -123,17 +132,9 @@ class SpeedingEvent(Base):
         return "Warning! Based on your driving patterns, " \
             "you are likely to speed within {} meters.".format(settings.ALERT_DISTANCE)
 
-# class BaseBrakeAccelEvent(Base):
-#     def __init__(self, trip, event, path):
-#         event = event.copy()
-#         event['trip'] = session.query(Trip).filter_by(trip_id_string=trip).first()
-#         event['point'] = Geometry.convert_geographic_coordinates_to_projected_point(
-#             event['lat'], 
-#             event['log']
-#         )
-
-        
 class HardBrakeEvent(Base):
+    '''Database table for hard braking events, child of relation from trips table.
+    '''
     __tablename__ = 'hard_brake_events'
     hard_brake_event_id = Column(Integer, primary_key=True)
     trip_id = Column(Integer, ForeignKey('trips.trip_id'))
@@ -145,6 +146,9 @@ class HardBrakeEvent(Base):
     point = Column(Geometry(geometry_type='POINT', srid=settings.TARGET_PROJECTION))
 
     def __init__(self, trip, event, path):
+        '''Remap names to avoid collisions and create geometries.
+        '''
+
         event = event.copy()
         
         event['point'] = SpatialQueries.convert_geographic_coordinates_to_projected_point(
@@ -157,14 +161,13 @@ class HardBrakeEvent(Base):
         return "Warning! Based on your driving patterns, " \
             "you are likely to brake hard within {} meters.".format(settings.ALERT_DISTANCE)
         
-
-
     
 class HardAccelerationEvent(Base):
+    '''Database table for hard braking events, child of relation from trips table.
+    '''
     __tablename__ = 'hard_acceleration_events'
     hard_accleration_event_id = Column(Integer, primary_key=True)
     trip_id = Column(Integer, ForeignKey('trips.trip_id'))
-    
     lat = Column(Float)
     lon = Column(Float)
     ts = Column(BigInteger)
@@ -172,6 +175,8 @@ class HardAccelerationEvent(Base):
     point = Column(Geometry(geometry_type='POINT', srid=settings.TARGET_PROJECTION))
 
     def __init__(self, trip, event, path):
+        '''Remap names to avoid collisions and create geometries.
+        '''
         event = event.copy()
         
         event['point'] = SpatialQueries.convert_geographic_coordinates_to_projected_point(
@@ -186,24 +191,43 @@ class HardAccelerationEvent(Base):
             "you are likely to accelerate hard within {} meters.".format(settings.ALERT_DISTANCE)
 
 class SpatialQueries:
-    
+    '''This class provides wrappers around spatial functions.
+
+    This class mainly acts as glue for a number of functions, so they are
+    all classmethods because instantiation isn't necessary.
+
+    I'm not thrilled that it needs to be in models.py, but it turns out that
+    many of the mapped objects require spatial functions in order to initialize.
+    Initially this class was in its own file, until I ran in to problems with
+    circular imports.
+    '''
     @classmethod
     def find_trips_matching_line(cls, line, user_id):
-        # use azimuth of last two points to determine if the route
-        # is in the right direction
-        # maybe use last three points for two azimuths,
-        # find some function to find nearest point on trip line
-        # so then we have to go third to second in same dir
-        # and second to first in same dir
+        '''Find trips which completely contain the given line.
 
-        ## use ST_LineLocatePoint to find the consective points on the line
-        ## use ST_OrderingEquals to make sure that they all go in the same dir
+        Eventually, this class could also check to make sure that
+        the given line is also heading in the same direction. This
+        can be accomplished by finding the nearest point on a given
+        route to each vertex on the input line (ST_LineLocatePoint). 
+        There is a function
+        called ST_OrderingEquals which will find if lines are moving
+        in the same direction. So those derived points could be compared
+        to the route to check that the original input line is moving in the
+        correct direction.
+
+        Another interesting addition would be to relax the contraint that
+        every point of the given line needs to be inside of the target
+        route buffer. Instead, maybe only 90% of points from a sufficiently
+        large sample size would be sufficient.
+        '''
         proj_line = cls.points_to_projected_line(line)
         s = session.query(Trip).filter_by(user_id=user_id).filter(func.ST_Within(proj_line, Trip.geom))
         return s
     
     @classmethod
     def get_associated_events(cls, trip):
+        '''Accumulate all points from a trip into the same list.'''
+
         events = []
         for event in trip.speeding_events:
             events.append(event)
@@ -215,6 +239,8 @@ class SpatialQueries:
 
     @classmethod
     def find_adjacent_events(cls, point, events):
+        '''
+        '''
         adjacent_events = []
         for event in events:
             within = session.execute(
