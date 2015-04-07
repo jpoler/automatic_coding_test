@@ -2,9 +2,8 @@
 
 The biggest missing thing here is spatial indexes. Could provide a huge speedup.
 '''
-
-## California UTM zone 10: 26910
-## Assuming NAD83 for datum
+## California UTM zone 10: srid 26910
+## Assuming NAD83 for datum: srid 4326
 
 import random
 
@@ -22,7 +21,7 @@ import settings
 Base = declarative_base()
 
 class User(Base):
-    """username, which is assumed to be unique, and one-to-many rel with Trip"""
+    '''username, which is assumed to be unique, and one-to-many rel with Trip.'''
     __tablename__ = 'users'
     user_id = Column(Integer, primary_key=True)
     username = Column(String, unique=True)
@@ -32,7 +31,7 @@ class User(Base):
         return "<User(username='{}')>".format(self.username)
 
 class Trip(Base):
-    """Trips contain all information available from the API as fields."""
+    '''Trips contain all information available from the API as fields.'''
     __tablename__ = 'trips'
     trip_id = Column(Integer, primary_key=True)
     geom = Column(Geometry(geometry_type='POLYGON', srid=settings.TARGET_PROJECTION))
@@ -65,7 +64,7 @@ class Trip(Base):
         '''This function needs to modify the input data that it is provided.
         
         Special considerations need to be made for geometry fields and remapping
-        of keys to avoid collisions.
+          of keys to avoid collisions.
         '''
         trip = trip.copy()
         self.event_types = {
@@ -99,8 +98,8 @@ class Trip(Base):
             lst.append(cls(trip['trip_id_string'], event, path_linestring))
 
 class SpeedingEvent(Base):
-    '''Database table for speeding events, child of relation from trips table.
-    '''
+    '''Database table for speeding events, child of relation from trips table.'''
+
     __tablename__ = 'speeding_events'
     speeding_event_id = Column(Integer, primary_key=True)
     trip_id = Column(Integer, ForeignKey('trips.trip_id'))
@@ -115,8 +114,8 @@ class SpeedingEvent(Base):
     velocity_mph = Column(Float)
 
     def __init__(self, trip, event, path):
-        '''Remap names to avoid collisions and create geometries.
-        '''
+        '''Remap names to avoid collisions and create geometries.'''
+
         event = event.copy()
         event['line'] = SpatialQueries.find_line_substring(
             path, 
@@ -133,12 +132,11 @@ class SpeedingEvent(Base):
             "you are likely to speed within {} meters.".format(settings.ALERT_DISTANCE)
 
 class HardBrakeEvent(Base):
-    '''Database table for hard braking events, child of relation from trips table.
-    '''
+    '''Database table for hard braking events, child of relation from trips table.'''
+
     __tablename__ = 'hard_brake_events'
     hard_brake_event_id = Column(Integer, primary_key=True)
     trip_id = Column(Integer, ForeignKey('trips.trip_id'))
-    
     lat = Column(Float)
     lon = Column(Float)
     ts = Column(BigInteger)
@@ -146,11 +144,9 @@ class HardBrakeEvent(Base):
     point = Column(Geometry(geometry_type='POINT', srid=settings.TARGET_PROJECTION))
 
     def __init__(self, trip, event, path):
-        '''Remap names to avoid collisions and create geometries.
-        '''
+        '''Remap names to avoid collisions and create geometries.'''
 
         event = event.copy()
-        
         event['point'] = SpatialQueries.convert_geographic_coordinates_to_projected_point(
             event['lat'], 
             event['lon']
@@ -178,11 +174,9 @@ class HardAccelerationEvent(Base):
         '''Remap names to avoid collisions and create geometries.
         '''
         event = event.copy()
-        
         event['point'] = SpatialQueries.convert_geographic_coordinates_to_projected_point(
             event['lat'], 
             event['lon']
-
         )
         super(HardAccelerationEvent, self).__init__(**event)
 
@@ -205,7 +199,7 @@ class SpatialQueries:
     def find_trips_matching_line(cls, line, user_id):
         '''Find trips which completely contain the given line.
 
-        Eventually, this class could also check to make sure that
+        Eventually, this method could also check to make sure that
         the given line is also heading in the same direction. This
         can be accomplished by finding the nearest point on a given
         route to each vertex on the input line (ST_LineLocatePoint). 
@@ -239,8 +233,8 @@ class SpatialQueries:
 
     @classmethod
     def find_adjacent_events(cls, point, events):
-        '''
-        '''
+        '''Find any event within settings.ALERT_DISTANCE of point.'''
+        
         adjacent_events = []
         for event in events:
             within = session.execute(
@@ -253,8 +247,8 @@ class SpatialQueries:
 
     @classmethod
     def segmentized_line_with_geographic_points(cls, trip_id):
-        """ Returns (lat, lon) of geographic coordinate of points every 50m along route.
-        Mainly intended for use with testing."""
+        ''' Returns (lat, lon) of geographic coordinate of points every 50m along route.
+        Mainly intended for use with testing.'''
         s = select([
             func.ST_DumpPoints(func.ST_Transform(func.ST_Segmentize(Trip.geom_path, 50), 
                                                  settings.TARGET_DATUM))\
@@ -271,6 +265,20 @@ class SpatialQueries:
 
     @classmethod
     def adjacent_events_from_point_sequence(cls, point_group, user_id):
+        '''Returns all events within a certain distance of the end of a point sequence.
+        
+        This method builds on find_trips_matching_line, get_associated_events,
+        and find_adjacent_events.
+        
+        Args:
+          cls (SpatialQueries): Class object
+          point_group (list): List of geographic points
+          user_id (int): integer primary key of the users database table
+
+        Returns:
+          list of events, which can be any of SpeedingEvent, HardAccelerationEvent,
+          or HardBrakingEvent.
+        '''
         total_adjacent_events = []
         if len(point_group) < 2:
             return total_adjacent_events
@@ -282,13 +290,33 @@ class SpatialQueries:
             total_adjacent_events.extend(cls.find_adjacent_events(proj_point, events))
         return total_adjacent_events
 
-
     @staticmethod
     def point_to_string(lat, lon):
+        '''Returns the Well-Known-Text representation of a geographic coordinate.
+
+        Args:
+          lat (float): latitude of geographic coordinate
+          lon (float): longitude of geographic coordinate
+        
+        Returns:
+          str: The string WKT representation of the point
+        '''
         return "POINT({} {})".format(lon, lat)
     
     @classmethod
     def convert_geographic_coordinates_to_projected_point(cls, lat, lon):
+        '''Returns a projected point from geographic coordinates.
+        
+        Args:
+          cls (SpatialQueries): Class object
+          lat (float): latitude of geographic coordinate
+          lon (float): longitude of geographic coordinate
+        
+        Returns:
+          This returns a query object, that when executed will return the desired
+            projected point.
+          
+        '''
         point_string = cls.point_to_string(lat, lon)
         return func.ST_Transform(
             func.ST_GeometryFromText(point_string, settings.TARGET_DATUM),
@@ -297,6 +325,15 @@ class SpatialQueries:
 
     @classmethod
     def convert_projected_point_to_geographic_coordinates(cls, point):
+        '''Returns a tuple of (latitude, longitude) coordinates
+
+        Args:
+          cls (SpatialQueries): Class object
+          point (geometry): PostGIS Geometry type of a projected point
+
+        Returns:
+          tuple of (latitude, longitude) coordinates
+        '''
         s = select([
             func.ST_Transform(func.ST_WKBToSQL(point), settings.TARGET_DATUM).label('p')
         ])
@@ -309,14 +346,38 @@ class SpatialQueries:
         
     @staticmethod
     def path_to_string(path):
+        '''Returns a string of comma seperated (x, y) coordinates
+        
+        Notice that (lat, lon) is switched to (lon, lat) which is (x, y).
+        '''
         return ','.join(['{} {}'.format(lon, lat) for lat, lon in path])
 
     @classmethod
     def construct_linestring_string(cls, srid, path):
+        '''Returns the LINESTRING WKT representation of an input path.
+
+        Args:
+          cls (SpatialQuery): Class object
+          srid (int): Spatial Reference System Identifier
+          path (tuple): Tuple of geographic coordinates
+
+        Returns:
+          Returns the WKT representation of an input path.
+        '''
         return 'SRID={};LINESTRING({})'.format(srid, cls.path_to_string(path))
     
     @staticmethod
     def find_line_substring(path, start, end):
+        '''Returns a substring from start to end distances of a given path.
+
+        Args:
+          path (Geometry): PostGIS Geometry object
+          start (int): Distance from start vertex of line in meters
+          end (int): Distance from start vertex of line in meters
+        
+        Returns:
+          Returns a subpath of given line from start to end
+        '''
         length = func.ST_Length(path)
         start_fraction = start / length
         end_fraction = end / length
@@ -324,14 +385,25 @@ class SpatialQueries:
 
     @staticmethod
     def line_start_point(line):
+        ''' Simple wrapper of ST_StartPoint, which returns first point in a line.'''
         return func.ST_StartPoint(line)
 
     @staticmethod
     def line_end_point(line):
+        '''Simple wrapper of ST_EndPoint, which returns the last point in a line.'''
         return func.ST_EndPoint(line)
 
     @classmethod
     def points_to_projected_line(cls, line):
+        '''Acts as a wrapper around a PostGIS Geometry constructor.
+
+        Args:
+          cls (SpatialQueries): Class object
+          line (tuple): Tuple of geographic coordinate pairs.
+
+        Returns:
+          Geometry: A postgis Geometry object
+        '''
         return func.ST_Transform(
             func.ST_GeometryFromText(cls.construct_linestring_string(settings.TARGET_DATUM, line)),
             settings.TARGET_PROJECTION
@@ -340,10 +412,22 @@ class SpatialQueries:
 
     @classmethod
     def dump_points_to_projected_line(cls, line):
+        '''Wraps SpatialQueries.points_to_projected_line, dumps all points.'''
         return func.ST_DumpPoints(cls.points_to_projected_line(line))
 
     @classmethod
     def find_test_point_within_distance(cls, point, line):
+        '''Returns a test point within settings.ALERT_DISTANCE of given point
+        along the given line.
+        
+        Args:
+          cls (SpatialQueries): Class object
+          point (Geometry): PostGIS point Geometry object
+          line (Geometry): PostGIS line Geometry object
+        
+        Returns:
+          Geometry: A new PostGIS point Geometry object
+        '''
         ratio_location_query = func.ST_LineLocatePoint(line, point)
         ratio = list(session.execute(ratio_location_query))[0][0]
         line_length = func.ST_Length(line)
@@ -361,6 +445,21 @@ class SpatialQueries:
 
     @classmethod
     def find_test_point_outside_distance(cls, point, line):
+        '''Returns a test point outside of settings.ALERT_DISTANCE of given point
+        along the given line.
+
+        Args:
+          cls (SpatialQueries): Class object
+          point (Geometry): PostGIS point Geometry object
+          line (Geometry): PostGIS line Geometry object
+        
+        Returns:
+          Geometry: A new PostGIS point Geometry object on success.
+            If the point given is within settings.ALERT_DISTANCE of the start
+            vertex of the given line, this function returns None, because
+            a point outside of the requested range before the given point
+            isn't possible.
+        '''
         ratio_location_query = func.ST_LineLocatePoint(line, point)
         ratio = list(session.execute(ratio_location_query))[0][0]
         line_length = func.ST_Length(line)
@@ -381,6 +480,3 @@ class SpatialQueries:
             func.ST_Line_Interpolate_Point(
             line, new_distance/total_length)))[0][0]
         return new_point
-        
-    
-        
