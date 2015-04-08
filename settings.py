@@ -7,4 +7,5 @@ MAX_GPS_ERROR_TOLERANCE = 20 # in meters, arbitrary choice
 ALERT_DISTANCE = 200 # in meters, also arbitrary
 USERNAME = os.environ['AUTOMATIC_TEST_USERNAME']
 OS_USERNAME = 'jdp'
+PORT = 5000
 
