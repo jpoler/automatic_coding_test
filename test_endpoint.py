@@ -20,6 +20,49 @@ class TestRESTEndpoint(unittest.TestCase):
         ## assert that 403 is returned on invalid username
         self.assertEqual(rv.status_code, 403)
 
+    def test_no_json_param_returns_400(self):
+        url = '/alerts/{username}?useless_param={useless_param}'.format(
+            **{'username': self.username,
+               'useless_param': 'foo',})
+        rv = self.app.get(url)
+        
+        self.assertEqual(rv.status_code, 400)
+        
+        # just to make sure that json is parseable and has a message attribute
+        json_response = json.loads(rv.data)
+        self.assertTrue('message' in json_response)
+        self.assertIsInstance(json_response['message'], unicode)
+
+    def test_malformed_json_object_returns_400(self):
+        url = '/alerts/{username}?json={json}'.format(
+            **{'username': self.username,
+               'json': '{badness>]}',})
+        rv = self.app.get(url)
+        
+        self.assertEqual(rv.status_code, 400)
+        
+        # just to make sure that json is parseable and has a message attribute
+        json_response = json.loads(rv.data)
+        self.assertTrue('message' in json_response)
+        self.assertIsInstance(json_response['message'], unicode)
+        
+
+    def test_no_points_returns_400(self):
+        url = '/alerts/{username}?json={json}'.format(
+            **{'username': self.username,
+               'json': '{}',})
+        rv = self.app.get(url)
+        
+        self.assertEqual(rv.status_code, 400)
+        
+        # just to make sure that json is parseable and has a message attribute
+        json_response = json.loads(rv.data)
+        self.assertTrue('message' in json_response)
+        self.assertIsInstance(json_response['message'], unicode)
+        self.assertTrue('points' in json_response['message'])
+        
+        
+
     def test_endpoint_yields_correct_messages(self):
         points = SQ.segmentized_line_with_geographic_points(1)
         for i in range(0, len(points), 3):
